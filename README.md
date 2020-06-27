@@ -1,3 +1,3 @@
-# MODULE_NAME
+# process_ble_data
 
-SHORT_DESCRIPTION
+Tools for fetching, processing, visualizing, and analyzing Wildflower BLE data
