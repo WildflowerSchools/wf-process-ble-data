@@ -403,6 +403,64 @@ def fetch_environment_id(
         return environment_id
     return None
 
+def fetch_device_info(
+    device_ids,
+    chunk_size=100,
+    client=None,
+    uri=None,
+    token_uri=None,
+    audience=None,
+    client_id=None,
+    client_secret=None
+):
+    logger.info('Building query list for device search')
+    query_list=list()
+    query_list.append({
+        'field': 'device_id',
+        'operator': 'IN',
+        'values': device_ids
+    })
+    return_data= [
+        'device_id',
+        'part_number',
+        'device_type',
+        'name',
+        'tag_id',
+        'serial_number'
+    ]
+    result = search_devices(
+        query_list=query_list,
+        return_data=return_data,
+        chunk_size=chunk_size,
+        client=client,
+        uri=uri,
+        token_uri=token_uri,
+        audience=audience,
+        client_id=client_id,
+    )
+    logger.info('{} devices found for specified device IDs'.format(len(result)))
+    data = list()
+    for datum in result:
+        data.append({
+            'device_id': datum.get('device_id'),
+            'device_part_number': datum.get('part_number'),
+            'device_type': datum.get('device_type'),
+            'device_name': datum.get('name'),
+            'device_tag_id': datum.get('tag_id'),
+            'device_serial_number': datum.get('serial_number'),
+        })
+    devices_df = pd.DataFrame(data)
+    devices_df.set_index('device_id', inplace=True)
+    return_columns = [
+        'device_part_number',
+        'device_type',
+        'device_name',
+        'device_tag_id',
+        'device_serial_number',
+    ]
+    devices_df = devices_df.reindex(columns=return_columns)
+    return devices_df
+
 def fetch_device_assignments(
     environment_id,
     start=None,
@@ -490,7 +548,7 @@ def fetch_device_assignments(
         assignments_df.columns = [column_name_prefix + '_' + column_name for column_name in assignments_df.columns]
     return assignments_df
 
-def fetch_person_assignments(
+def fetch_device_person_assignments(
     device_ids,
     start=None,
     end=None,
@@ -580,7 +638,7 @@ def fetch_person_assignments(
     person_assignments_df = person_assignments_df.reindex(columns=return_columns)
     return person_assignments_df
 
-def fetch_position_assignments(
+def fetch_device_position_assignments(
     device_ids,
     coordinate_space_id,
     start=None,
@@ -706,6 +764,33 @@ def search_ble_datapoints(
         client_id=client_id,
     )
     logger.info('Returned {} datapoints'.format(len(result)))
+    return result
+
+def search_devices(
+    query_list,
+    return_data,
+    chunk_size=100,
+    client=None,
+    uri=None,
+    token_uri=None,
+    audience=None,
+    client_id=None,
+    client_secret=None
+):
+    logger.info('Searching for devices that match the specified parameters')
+    result = search_objects(
+        request_name='searchDevices',
+        query_list=query_list,
+        return_data=return_data,
+        id_field_name='device_id',
+        chunk_size=chunk_size,
+        client=client,
+        uri=uri,
+        token_uri=token_uri,
+        audience=audience,
+        client_id=client_id,
+    )
+    logger.info('Returned {} devices'.format(len(result)))
     return result
 
 def search_assignments(
