@@ -5,6 +5,149 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+def fetch_ble_radio_pings(
+    start=None,
+    end=None,
+    environment_id=None,
+    environment_name=None,
+    return_tag_name=False,
+    return_tag_tag_id=False,
+    return_anchor_name=False,
+    tag_device_types=['BLETAG'],
+    anchor_device_types=['PIZERO', 'PI3', 'PI3WITHCAMERA'],
+    chunk_size=100,
+    client=None,
+    uri=None,
+    token_uri=None,
+    audience=None,
+    client_id=None,
+    client_secret=None
+):
+    logger.info('Resolving environment specification')
+    environment_id = fetch_environment_id(
+        environment_id=environment_id,
+        environment_name=environment_name,
+        client=client,
+        uri=uri,
+        token_uri=token_uri,
+        audience=audience,
+        client_id=client_id,
+        client_secret=client_secret
+    )
+    if environment_id is None:
+        raise ValueError('Must specify environment')
+    logger.info('Fetching tag device assignments')
+    tag_assignments_df = fetch_device_assignments(
+        environment_id=environment_id,
+        start=start,
+        end=end,
+        device_types=tag_device_types,
+        column_name_prefix='tag',
+        chunk_size=chunk_size,
+        client=client,
+        uri=uri,
+        token_uri=token_uri,
+        audience=audience,
+        client_id=client_id,
+        client_secret=client_secret
+    )
+    logger.info('{} tag device assignments matched specified criteria'.format(len(tag_assignments_df)))
+    logger.info('Fetching anchor device assignments')
+    anchor_assignments_df = fetch_device_assignments(
+        environment_id=environment_id,
+        start=start,
+        end=end,
+        device_types=anchor_device_types,
+        column_name_prefix='anchor',
+        chunk_size=chunk_size,
+        client=client,
+        uri=uri,
+        token_uri=token_uri,
+        audience=audience,
+        client_id=client_id,
+        client_secret=client_secret
+    )
+    logger.info('{} anchor device assignments matched specified criteria'.format(len(anchor_assignments_df)))
+    tag_device_ids = tag_assignments_df['tag_device_id'].unique().tolist()
+    anchor_device_ids = anchor_assignments_df['anchor_device_id'].unique().tolist()
+    logger.info('Building query list for BLE datapoint search')
+    query_list = list()
+    query_list.append({
+        'field': 'tag_device',
+        'operator': 'IN',
+        'values': tag_device_ids
+    })
+    query_list.append({
+        'field': 'anchor_device',
+        'operator': 'IN',
+        'values': anchor_device_ids
+    })
+    if start is not None:
+        query_list.append({
+            'field': 'timestamp',
+            'operator': 'GTE',
+            'value': minimal_honeycomb.to_honeycomb_datetime(start)
+        })
+    if end is not None:
+        query_list.append({
+            'field': 'timestamp',
+            'operator': 'LTE',
+            'value': minimal_honeycomb.to_honeycomb_datetime(end)
+        })
+    return_data= [
+        'radio_ping_id',
+        'timestamp',
+        {'tag_device': [
+            'device_id'
+        ]},
+        {'anchor_device': [
+            'device_id'
+        ]},
+        'signal_strength'
+    ]
+    result = search_ble_radio_pings(
+        query_list=query_list,
+        return_data=return_data,
+        chunk_size=chunk_size,
+        client=client,
+        uri=uri,
+        token_uri=token_uri,
+        audience=audience,
+        client_id=client_id,
+        client_secret=client_secret
+    )
+    data = list()
+    logger.info('Parsing {} returned radio_pings'.format(len(result)))
+    for datum in result:
+        data.append({
+            'radio_ping_id': datum.get('radio_ping_id'),
+            'timestamp': datum.get('timestamp'),
+            'tag_device_id': datum.get('tag_device').get('device_id'),
+            'anchor_device_id': datum.get('anchor_device').get('device_id'),
+            'rssi': float(datum.get('signal_strength'))
+        })
+    radio_pings_df = pd.DataFrame(data)
+    radio_pings_df['timestamp'] = pd.to_datetime(radio_pings_df['timestamp'])
+    radio_pings_df.set_index('radio_ping_id', inplace=True)
+    radio_pings_df = radio_pings_df.join(tag_assignments_df.set_index('tag_device_id'), on='tag_device_id')
+    radio_pings_df = radio_pings_df.join(anchor_assignments_df.set_index('anchor_device_id'), on='anchor_device_id')
+    return_columns = [
+        'timestamp',
+        'tag_device_id',
+    ]
+    if return_tag_name:
+        return_columns.append('tag_name')
+    if return_tag_tag_id:
+        return_columns.append('tag_tag_id')
+    return_columns.extend([
+        'anchor_device_id'
+    ])
+    if return_anchor_name:
+        return_columns.append('anchor_name')
+    return_columns.append('rssi')
+    radio_pings_df = radio_pings_df.reindex(columns=return_columns)
+    return radio_pings_df
+
 def fetch_ble_datapoints(
     start=None,
     end=None,
@@ -346,6 +489,33 @@ def fetch_device_assignments(
         assignments_df.index.name = column_name_prefix + '_' + assignments_df.index.name
         assignments_df.columns = [column_name_prefix + '_' + column_name for column_name in assignments_df.columns]
     return assignments_df
+
+def search_ble_radio_pings(
+    query_list,
+    return_data,
+    chunk_size=100,
+    client=None,
+    uri=None,
+    token_uri=None,
+    audience=None,
+    client_id=None,
+    client_secret=None
+):
+    logger.info('Searching for BLE radio pings that match the specified parameters')
+    result = search_objects(
+        request_name='searchRadioPings',
+        query_list=query_list,
+        return_data=return_data,
+        id_field_name='radio_ping_id',
+        chunk_size=chunk_size,
+        client=client,
+        uri=uri,
+        token_uri=token_uri,
+        audience=audience,
+        client_id=client_id,
+    )
+    logger.info('Returned {} radio pings'.format(len(result)))
+    return result
 
 def search_ble_datapoints(
     query_list,
