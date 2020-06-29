@@ -10,6 +10,9 @@ def fetch_ble_datapoints(
     end=None,
     environment_id=None,
     environment_name=None,
+    return_tag_name=False,
+    return_tag_tag_id=False,
+    return_anchor_name=False,
     tag_device_types=['BLETAG'],
     anchor_device_types=['PIZERO', 'PI3', 'PI3WITHCAMERA'],
     chunk_size=100,
@@ -39,6 +42,7 @@ def fetch_ble_datapoints(
         start=start,
         end=end,
         device_types=tag_device_types,
+        column_name_prefix='tag',
         chunk_size=chunk_size,
         client=client,
         uri=uri,
@@ -54,6 +58,7 @@ def fetch_ble_datapoints(
         start=start,
         end=end,
         device_types=anchor_device_types,
+        column_name_prefix='anchor',
         chunk_size=chunk_size,
         client=client,
         uri=uri,
@@ -88,12 +93,7 @@ def fetch_ble_datapoints(
         'timestamp',
         {'source': [
             {'... on Assignment': [
-                'assignment_id',
-                {'assigned': [
-                    {'... on Device': [
-                        'device_id'
-                    ]}
-                ]}
+                'assignment_id'
             ]}
         ]},
         {'file': [
@@ -119,36 +119,37 @@ def fetch_ble_datapoints(
             'data_id': datum.get('data_id'),
             'timestamp': datum.get('timestamp'),
             'tag_assignment_id': datum.get('source').get('assignment_id'),
-            'tag_device_id': datum.get('source').get('assigned').get('device_id'),
             'anchor_id': data_dict.get('anchor_id'),
             'rssi': float(data_dict.get('rssi'))
         })
     datapoints_df = pd.DataFrame(data)
     datapoints_df['timestamp'] = pd.to_datetime(datapoints_df['timestamp'])
     datapoints_df.set_index('data_id', inplace=True)
+    datapoints_df = datapoints_df.join(tag_assignments_df, on='tag_assignment_id')
     assignment_anchor_ids_df = anchor_assignments_df.copy().reset_index()
-    assignment_anchor_ids_df['anchor_id'] = assignment_anchor_ids_df['assignment_id']
+    assignment_anchor_ids_df['anchor_id'] = assignment_anchor_ids_df['anchor_assignment_id']
     assignment_anchor_ids_df.set_index('anchor_id', inplace=True)
     device_anchor_ids_df = anchor_assignments_df.copy().reset_index()
-    device_anchor_ids_df['anchor_id'] = device_anchor_ids_df['device_id']
+    device_anchor_ids_df['anchor_id'] = device_anchor_ids_df['anchor_device_id']
     device_anchor_ids_df.set_index('anchor_id', inplace=True)
     anchor_ids_df = pd.concat((assignment_anchor_ids_df, device_anchor_ids_df))
-    anchor_ids_df.rename(
-        columns={
-            'assignment_id': 'anchor_assignment_id',
-            'device_id': 'anchor_device_id'
-        },
-        inplace=True
-    )
     datapoints_df = datapoints_df.join(anchor_ids_df, on='anchor_id')
     return_columns = [
         'timestamp',
         'tag_assignment_id',
         'tag_device_id',
-        'anchor_assignment_id',
-        'anchor_device_id',
-        'rssi'
     ]
+    if return_tag_name:
+        return_columns.append('tag_name')
+    if return_tag_tag_id:
+        return_columns.append('tag_tag_id')
+    return_columns.extend([
+        'anchor_assignment_id',
+        'anchor_device_id'
+    ])
+    if return_anchor_name:
+        return_columns.append('anchor_name')
+    return_columns.append('rssi')
     datapoints_df = datapoints_df.reindex(columns=return_columns)
     return datapoints_df
 
@@ -207,6 +208,7 @@ def fetch_device_assignments(
     start=None,
     end=None,
     device_types=None,
+    column_name_prefix=None,
     chunk_size=100,
     client=None,
     uri=None,
@@ -234,7 +236,11 @@ def fetch_device_assignments(
         {'assigned': [
             {'... on Device': [
                 'device_id',
-                'device_type'
+                'part_number',
+                'device_type',
+                'name',
+                'tag_id',
+                'serial_number'
             ]}
         ]}
     ]
@@ -260,17 +266,28 @@ def fetch_device_assignments(
         if device_types is None or datum.get('assigned').get('device_type') in device_types:
             data.append({
                 'assignment_id': datum.get('assignment_id'),
+                'device_id': datum.get('assigned').get('device_id'),
                 'device_type': datum.get('assigned').get('device_type'),
-                'device_id': datum.get('assigned').get('device_id')
+                'name': datum.get('assigned').get('name'),
+                'part_number': datum.get('assigned').get('part_number'),
+                'serial_number': datum.get('assigned').get('serial_number'),
+                'tag_id': datum.get('assigned').get('tag_id'),
             })
     logger.info('{} device assignments are consistent with the specified device types'.format(len(data)))
     assignments_df = pd.DataFrame(data)
     assignments_df.set_index('assignment_id', inplace=True)
     return_columns = [
-        'device_type',
         'device_id',
+        'device_type',
+        'name',
+        'part_number',
+        'serial_number',
+        'tag_id'
     ]
     assignments_df = assignments_df.reindex(columns=return_columns)
+    if column_name_prefix is not None:
+        assignments_df.index.name = column_name_prefix + '_' + assignments_df.index.name
+        assignments_df.columns = [column_name_prefix + '_' + column_name for column_name in assignments_df.columns]
     return assignments_df
 
 def search_ble_datapoints(
