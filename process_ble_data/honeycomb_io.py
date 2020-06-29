@@ -490,6 +490,96 @@ def fetch_device_assignments(
         assignments_df.columns = [column_name_prefix + '_' + column_name for column_name in assignments_df.columns]
     return assignments_df
 
+def fetch_person_assignments(
+    device_ids,
+    start=None,
+    end=None,
+    chunk_size=100,
+    client=None,
+    uri=None,
+    token_uri=None,
+    audience=None,
+    client_id=None,
+    client_secret=None
+):
+    logger.info('Building query list for entity assignment search')
+    query_list=list()
+    query_list.append({
+        'field': 'device',
+        'operator': 'IN',
+        'values': device_ids
+    })
+    return_data= [
+        'entity_assignment_id',
+        'start',
+        'end',
+        'entity_type',
+        {'entity': [
+            {'...on Person': [
+                'person_id',
+                'name',
+                'first_name',
+                'last_name',
+                'nickname',
+                'short_name',
+                'person_type',
+                'transparent_classroom_id'
+            ]}
+        ]},
+        {'device': [
+            'device_id'
+        ]}
+    ]
+    result = search_entity_assignments(
+        query_list=query_list,
+        return_data=return_data,
+        chunk_size=chunk_size,
+        client=client,
+        uri=uri,
+        token_uri=token_uri,
+        audience=audience,
+        client_id=client_id,
+    )
+    logger.info('{} entity assignments found for specified devices'.format(len(result)))
+    filtered_result = minimal_honeycomb.filter_assignments(
+        assignments=result,
+        start_time=start,
+        end_time=end
+    )
+    logger.info('{} entity assignments are consistent with the specified time window'.format(len(filtered_result)))
+    data = list()
+    for datum in filtered_result:
+        if datum.get('entity_type') == 'PERSON':
+            data.append({
+                'entity_assignment_id': datum.get('entity_assignment_id'),
+                'device_id': datum.get('device').get('device_id'),
+                'person_id': datum.get('entity').get('person_id'),
+                'person_name': datum.get('entity').get('name'),
+                'person_first_name': datum.get('entity').get('first_name'),
+                'person_last_name': datum.get('entity').get('last_name'),
+                'person_nickname': datum.get('entity').get('nickname'),
+                'person_short_name': datum.get('entity').get('short_name'),
+                'person_type': datum.get('entity').get('person_type'),
+                'person_transparent_classroom_id': datum.get('entity').get('transparent_classroom_id')
+            })
+    logger.info('{} entity assignments correspond to people'.format(len(data)))
+    person_assignments_df = pd.DataFrame(data)
+    if sum(person_assignments_df['device_id'].duplicated()) > 0:
+        raise ValueError('Some specified devices have multiple person assigments in the specified time window')
+    person_assignments_df.set_index('device_id', inplace=True)
+    return_columns = [
+        'person_id',
+        'person_name',
+        'person_first_name',
+        'person_last_name',
+        'person_nickname',
+        'person_short_name',
+        'person_type',
+        'person_transparent_classroom_id'
+    ]
+    person_assignments_df = person_assignments_df.reindex(columns=return_columns)
+    return person_assignments_df
+
 def search_ble_radio_pings(
     query_list,
     return_data,
@@ -569,6 +659,33 @@ def search_assignments(
         client_id=client_id,
     )
     logger.info('Returned {} assignments'.format(len(result)))
+    return result
+
+def search_entity_assignments(
+    query_list,
+    return_data,
+    chunk_size=100,
+    client=None,
+    uri=None,
+    token_uri=None,
+    audience=None,
+    client_id=None,
+    client_secret=None
+):
+    logger.info('Searching for entity assignments that match the specified parameters')
+    result = search_objects(
+        request_name='searchEntityAssignments',
+        query_list=query_list,
+        return_data=return_data,
+        id_field_name='entity_assignment_id',
+        chunk_size=chunk_size,
+        client=client,
+        uri=uri,
+        token_uri=token_uri,
+        audience=audience,
+        client_id=client_id,
+    )
+    logger.info('Returned {} entity assignments'.format(len(result)))
     return result
 
 def search_objects(
