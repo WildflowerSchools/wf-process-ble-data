@@ -580,6 +580,80 @@ def fetch_person_assignments(
     person_assignments_df = person_assignments_df.reindex(columns=return_columns)
     return person_assignments_df
 
+def fetch_position_assignments(
+    device_ids,
+    coordinate_space_id,
+    start=None,
+    end=None,
+    chunk_size=100,
+    client=None,
+    uri=None,
+    token_uri=None,
+    audience=None,
+    client_id=None,
+    client_secret=None
+):
+    logger.info('Building query list for position assignment search')
+    query_list=list()
+    query_list.append({
+        'field': 'assigned',
+        'operator': 'IN',
+        'values': device_ids
+    })
+    query_list.append({
+        'field': 'coordinate_space',
+        'operator': 'EQ',
+        'value': coordinate_space_id
+    })
+    return_data= [
+        'position_assignment_id',
+        'start',
+        'end',
+        {'assigned': [
+            {'... on Device': [
+                'device_id'
+            ]}
+        ]},
+        'coordinates'
+    ]
+    result = search_position_assignments(
+        query_list=query_list,
+        return_data=return_data,
+        chunk_size=chunk_size,
+        client=client,
+        uri=uri,
+        token_uri=token_uri,
+        audience=audience,
+        client_id=client_id,
+    )
+    logger.info('{} position assignments found for specified devices'.format(len(result)))
+    filtered_result = minimal_honeycomb.filter_assignments(
+        assignments=result,
+        start_time=start,
+        end_time=end
+    )
+    logger.info('{} position assignments are consistent with the specified time window'.format(len(filtered_result)))
+    data = list()
+    for datum in filtered_result:
+        data.append({
+            'position_assignment_id': datum.get('position_assignment_id'),
+            'device_id': datum.get('assigned').get('device_id'),
+            'x_meters': float(datum.get('coordinates')[0]),
+            'y_meters': float(datum.get('coordinates')[1]),
+            'z_meters': float(datum.get('coordinates')[2])
+        })
+    position_assignments_df = pd.DataFrame(data)
+    if sum(position_assignments_df['device_id'].duplicated()) > 0:
+        raise ValueError('Some specified devices have multiple position assigments in the specified time window')
+    position_assignments_df.set_index('device_id', inplace=True)
+    return_columns = [
+        'x_meters',
+        'y_meters',
+        'z_meters'
+    ]
+    position_assignments_df = position_assignments_df.reindex(columns=return_columns)
+    return position_assignments_df
+
 def search_ble_radio_pings(
     query_list,
     return_data,
@@ -686,6 +760,33 @@ def search_entity_assignments(
         client_id=client_id,
     )
     logger.info('Returned {} entity assignments'.format(len(result)))
+    return result
+
+def search_position_assignments(
+    query_list,
+    return_data,
+    chunk_size=100,
+    client=None,
+    uri=None,
+    token_uri=None,
+    audience=None,
+    client_id=None,
+    client_secret=None
+):
+    logger.info('Searching for position assignments that match the specified parameters')
+    result = search_objects(
+        request_name='searchPositionAssignments',
+        query_list=query_list,
+        return_data=return_data,
+        id_field_name='position_assignment_id',
+        chunk_size=chunk_size,
+        client=client,
+        uri=uri,
+        token_uri=token_uri,
+        audience=audience,
+        client_id=client_id,
+    )
+    logger.info('Returned {} position assignments'.format(len(result)))
     return result
 
 def search_objects(
