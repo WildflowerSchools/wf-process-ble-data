@@ -153,6 +153,63 @@ def fetch_ble_datapoints(
     datapoints_df = datapoints_df.reindex(columns=return_columns)
     return datapoints_df
 
+def write_ble_radio_pings(
+    datapoints_df,
+    source_id_column_name='tag_assignment_id',
+    source_type='MEASURED',
+    chunk_size=100,
+    client=None,
+    uri=None,
+    token_uri=None,
+    audience=None,
+    client_id=None,
+    client_secret=None
+):
+    datapoints_df = datapoints_df.rename(
+        columns={
+            'tag_device_id': 'tag_device',
+            'anchor_device_id': 'anchor_device',
+            'rssi': 'signal_strength',
+            source_id_column_name: 'source'
+        }
+    )
+    datapoints_df = datapoints_df.reindex(columns=[
+        'timestamp',
+        'tag_device',
+        'anchor_device',
+        'signal_strength',
+        'source'
+    ])
+    datapoints_df['timestamp'] = datapoints_df['timestamp'].apply(lambda x:
+        minimal_honeycomb.to_honeycomb_datetime(x.to_pydatetime())
+    )
+    datapoints_df['source_type'] = source_type
+    datapoints_list = datapoints_df.to_dict(orient='records')
+    logger.info('Writing data for {} radio pings to Honeycomb'.format(len(datapoints_list)))
+    if client is None:
+        client = minimal_honeycomb.MinimalHoneycombClient(
+            uri=uri,
+            token_uri=token_uri,
+            audience=audience,
+            client_id=client_id,
+            client_secret=client_secret
+        )
+    result = client.bulk_mutation(
+        request_name='createRadioPing',
+        arguments={
+            'radioPing': {
+                'type': 'RadioPingInput',
+                'value': datapoints_list
+            }
+        },
+        return_object=[
+            'radio_ping_id'
+        ],
+        chunk_size=chunk_size
+    )
+    radio_ping_ids = [datum.get('radio_ping_id') for datum in result]
+    return radio_ping_ids
+
 def fetch_environment_id(
     environment_id=None,
     environment_name=None,
